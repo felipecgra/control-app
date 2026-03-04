@@ -33,7 +33,7 @@ const DEFAULT_CATEGORIES = {
   "Alimentação": { icon: "🍽️", color: "#F97316" },
   "Viagem": { icon: "✈️", color: "#6366F1" },
   "Transporte": { icon: "🚗", color: "#3B82F6" },
-  "Compras": { icon: "🛍️", color: "#EC4899" },
+  "Compras": { icon: "🎁", color: "#FBBF24" },
   "Vestuário": { icon: "👕", color: "#A855F7" },
   "Saúde": { icon: "🏥", color: "#EF4444" },
   "Assinaturas": { icon: "📱", color: "#14B8A6" },
@@ -44,6 +44,9 @@ const DEFAULT_CATEGORIES = {
   "Babá": { icon: "👶", color: "#E879F9" },
   "Diarista": { icon: "🧹", color: "#84CC16" },
   "Encargos": { icon: "💳", color: "#64748B" },
+  "Utilities": { icon: "💡", color: "#F59E0B" },
+  "Academia": { icon: "🏋️", color: "#10B981" },
+  "Supermercado": { icon: "🛒", color: "#22D3EE" },
 };
 
 const ICON_OPTIONS = ["🍽️","✈️","🚗","🛍️","👗","🏥","📱","🎭","🎓","🏠","🏢","👶","🧹","💳","💰","📦","🎯","🔧","🐾","🎨","📚","🏋️","💊","🎵","🍕","☕","🚌","✂️","🛒","📝","🎁","🌍","💡","🏖️","🎬","🧸","👕","💻","📞","🔑"];
@@ -99,32 +102,41 @@ const ITAU_CAT_MAP = {
   "VEÍCULOS": "Transporte", "VEICULOS": "Transporte",
   "MORADIA": "Compras", "SAÚDE": "Saúde", "SAUDE": "Saúde",
   "VESTUÁRIO": "Vestuário", "VESTUARIO": "Vestuário",
-  "EDUCAÇÃO": "Compras", "EDUCACAO": "Compras",
+  "EDUCAÇÃO": "Educação", "EDUCACAO": "Educação",
   "DIVERSOS": "Compras", "TURISMO E ENTRETENIM": "Lazer", "HOBBY": "Lazer",
+  "SUPERMERCADO": "Supermercado",
 };
 
 function categorize(desc) {
   const d = desc.toLowerCase();
-  const food = ["ifood","zona sul","supermercado","roda conveniencia","sushi","coffee","café","cafe",
+  const supermarket = ["supermercado","zona sul","hortifruti","pão de açúcar","pao de acucar",
+    "andre frutas","vitrine das frutas","mundial","extra ","guanabara","assai","atacadao",
+    "carrefour","prezunic","fort atacadista"];
+  if (supermarket.some(kw => d.includes(kw))) return "Supermercado";
+  const gym = ["academia","smart fit","bodytech","total pass","gympass","wellhub","race park"];
+  if (gym.some(kw => d.includes(kw))) return "Academia";
+  const utilities = ["light","bmb*light","enel","naturgy","sabesp","cedae","gas ","cpfl"];
+  if (utilities.some(kw => d.includes(kw))) return "Utilities";
+  const food = ["ifood","roda conveniencia","sushi","coffee","café","cafe",
     "burger","pizza","padaria","gelato","bakery","sofia","outback","fogo de ch","madero","koni","bbq",
-    "nipa","cosechas","almanara","hortifruti","rappi","ze delivery","esplanada grill","brewteco",
+    "nipa","cosechas","almanara","rappi","ze delivery","esplanada grill","brewteco",
     "iraja","cortes","mercearia","brisa","tradicao japonesa","campo belo","nb campo","tuy jardins",
     "mira padaria","jk fresh","pao com carne","slow bakery","delirio","salsalito","copacabana point",
     "baja california","mirante rocinha","tt burger","chez claude","azumi","rascal","momo gelato",
-    "crepes","donostia","cla ","diolivaprodutos","tapi","mate general","vitrine das frutas",
+    "crepes","donostia","cla ","diolivaprodutos","tapi","mate general",
     "coco bambu","spicy fish","kfc","itahy","babbo","mistura natural","botafogo cultura",
     "jim.com","cerveja","quiosque","leblonbeach","ibiapi","olgari","delly","ilza farias",
-    "absurda","rosildafeliza","gustavomesquita","nilsondesouza","andre frutas","mp*botequim",
+    "absurda","rosildafeliza","gustavomesquita","nilsondesouza","mp*botequim",
     "almendra","burr ","zig ","zig*","vaniakermarrara","viena","awmallev","sidneihenriq",
     "depanneur","sociedade secreta","sou do esporte","haru","andiamo","leticia beat","eleninha",
-    "belmonte","tintin","fat boyz","bosque bar","sala vip","pão de açúcar","pao de acucar",
+    "belmonte","tintin","fat boyz","bosque bar","sala vip",
     "vila das","mistral","dp2","companhia brasileir","cdx asa","rodrigo azevedo","marcos paulo",
     "jacqueline nazario","vo sofia","minutaiajai","copa samba","hubla","ifd*br","ifd*emp",
     "99food","tasting box","uva vinhos","nespresso","bbq shop","restaurante","lanchonete",
     "pudim da thai","sweet baba","anna","lu toalhas"];
   if (food.some(kw => d.includes(kw))) return "Alimentação";
   const transport = ["uber","metro rj","posto","netpark","parking","bm parking","aabb rio",
-    "roma vw","veloe","race park","whoosh","instacarro"];
+    "roma vw","veloe","whoosh","instacarro"];
   if (transport.some(kw => d.includes(kw))) return "Transporte";
   if (d.includes("bee") && d.includes("leblon")) return "Compras";
   if (["bee ","bee leblon"].some(kw => d.includes(kw))) return "Transporte";
@@ -143,8 +155,8 @@ function categorize(desc) {
     "decathlon","confederacao brasileira","quizomba","gustavo augusto moreira","bus servicos",
     "associação atletica","associacao atletica","petite julie buffet"];
   if (leisure.some(kw => d.includes(kw))) return "Lazer";
-  const subs = ["spotify","google one","folhadespaulo","editora o globo","ebn*spotify","light",
-    "bmb*light","mp*melimais","vivo-rj"];
+  const subs = ["spotify","google one","folhadespaulo","editora o globo","ebn*spotify",
+    "mp*melimais","vivo-rj"];
   if (subs.some(kw => d.includes(kw))) return "Assinaturas";
   const education = ["universidades estacio","espaco educacao"];
   if (education.some(kw => d.includes(kw))) return "Educação";
@@ -419,7 +431,7 @@ async function extractPdfText(file) {
 }
 
 const fmt = (v) => v.toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
-const fmtK = (v) => v >= 1000000 ? `${(v/1000000).toFixed(1)}M` : v >= 1000 ? `${(v/1000).toFixed(0)}k` : v.toString();
+const fmtK = (v) => v >= 1000000 ? `${(v/1000000).toFixed(1)}M` : v >= 1000 ? `${(v/1000).toFixed(0)}k` : Math.round(v).toString();
 const fmtNum = (v) => v.toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
 // ─── Chart Components ───
