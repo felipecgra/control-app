@@ -429,11 +429,12 @@ function DonutChart({ categories, totalSpend }) {
   const radius = (size - strokeWidth) / 2;
   const circumference = 2 * Math.PI * radius;
   let offset = 0;
+  const safeTotalSpend = totalSpend || 1;
   return (
     <svg width={size} height={size} viewBox={`0 0 ${size} ${size}`}>
       <circle cx={size/2} cy={size/2} r={radius} fill="none" stroke="#1a1f2e" strokeWidth={strokeWidth} />
       {categories.map((cat) => {
-        const pct = cat.total / totalSpend;
+        const pct = cat.total / safeTotalSpend;
         const dash = pct * circumference;
         const gap = circumference - dash;
         const el = (
@@ -987,6 +988,11 @@ function ControlApp() {
   const renderGastos = () => {
     if (selectedCategory) {
       const cat = computedCategories.find(c => c.name === selectedCategory);
+      if (!cat) {
+        // Category no longer has transactions — go back
+        setTimeout(() => setSelectedCategory(null), 0);
+        return null;
+      }
       return (
         <div style={{ animation: "slideIn 0.3s ease" }}>
           <button onClick={() => setSelectedCategory(null)}
@@ -1350,7 +1356,7 @@ function ControlApp() {
         </div>
         <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
           {computedCategories.map(cat => {
-            const pct = (cat.total / totalSpend) * 100;
+            const pct = totalSpend > 0 ? (cat.total / totalSpend) * 100 : 0;
             return (
               <div key={cat.name} onClick={() => setSelectedCategory(cat.name)}
                 style={{ display: "flex", alignItems: "center", gap: 14, padding: "14px 16px", borderRadius: 12, cursor: "pointer", background: "#0f1219", border: "1px solid transparent", transition: "all 0.2s" }}
@@ -1404,7 +1410,7 @@ function ControlApp() {
             {categoryAgg.map(c => (
               <div key={c.name} style={{ display: "flex", alignItems: "center", gap: 5 }}>
                 <div style={{ width: 8, height: 8, borderRadius: 2, background: c.color }} />
-                <span style={{ fontSize: 11, color: "#94a3b8" }}>{c.name} ({((c.value / totalInvest) * 100).toFixed(0)}%)</span>
+                <span style={{ fontSize: 11, color: "#94a3b8" }}>{c.name} ({(totalInvest > 0 ? (c.value / totalInvest) * 100 : 0).toFixed(0)}%)</span>
               </div>
             ))}
           </div>
@@ -1424,7 +1430,7 @@ function ControlApp() {
                     <div style={{ width: 10, height: 10, borderRadius: 3, background: cat.color }} />
                     <div>
                       <p style={{ margin: 0, color: "#e2e8f0", fontSize: 14, fontWeight: 500 }}>{cat.name}</p>
-                      <p style={{ margin: "2px 0 0", color: "#64748b", fontSize: 12 }}>{cat.items.length} {cat.items.length === 1 ? "ativo" : "ativos"} · {((cat.value / totalInvest) * 100).toFixed(1)}%</p>
+                      <p style={{ margin: "2px 0 0", color: "#64748b", fontSize: 12 }}>{cat.items.length} {cat.items.length === 1 ? "ativo" : "ativos"} · {(totalInvest > 0 ? (cat.value / totalInvest) * 100 : 0).toFixed(1)}%</p>
                     </div>
                   </div>
                   <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
@@ -1645,12 +1651,13 @@ function ControlApp() {
         ::-webkit-scrollbar-track { background: transparent; }
         ::-webkit-scrollbar-thumb { background: #1e293b; border-radius: 4px; }
         select { -webkit-appearance: none; appearance: none; }
+        .app-header { padding-top: max(20px, calc(env(safe-area-inset-top, 20px) + 8px)) !important; }
       `}</style>
 
       {/* Header */}
-      <div style={{ padding: isMobile ? "16px 16px 0" : "20px 28px 0", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-        <h1 style={{ margin: 0, fontSize: isMobile ? 18 : 22, fontWeight: 700, color: "#f1f5f9", letterSpacing: -0.5 }}>
-          <span style={{ color: "#0ea5e9" }}>⬡</span> Control
+      <div className="app-header" style={{ padding: isMobile ? "16px 16px 0" : "20px 28px 0", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+        <h1 style={{ margin: 0, fontSize: isMobile ? 18 : 22, fontWeight: 700, color: "#f1f5f9", letterSpacing: 1.5, textTransform: "uppercase" }}>
+          Control
         </h1>
         <div style={{ display: "flex", alignItems: "center", gap: isMobile ? 4 : 6 }}>
           {activeTab === "gastos" && (
