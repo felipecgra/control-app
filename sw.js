@@ -1,8 +1,5 @@
-const CACHE_NAME = "control-v1";
-const ASSETS = [
-  "./",
-  "./index.html",
-  "./manifest.json",
+const CACHE_NAME = "control-v2";
+const LIB_ASSETS = [
   "https://unpkg.com/react@18/umd/react.production.min.js",
   "https://unpkg.com/react-dom@18/umd/react-dom.production.min.js",
   "https://unpkg.com/@babel/standalone/babel.min.js",
@@ -12,7 +9,7 @@ const ASSETS = [
 
 self.addEventListener("install", (e) => {
   e.waitUntil(
-    caches.open(CACHE_NAME).then((cache) => cache.addAll(ASSETS))
+    caches.open(CACHE_NAME).then((cache) => cache.addAll(LIB_ASSETS))
   );
   self.skipWaiting();
 });
@@ -27,6 +24,23 @@ self.addEventListener("activate", (e) => {
 });
 
 self.addEventListener("fetch", (e) => {
+  const url = new URL(e.request.url);
+
+  // For HTML pages: network first, fallback to cache
+  if (e.request.mode === "navigate" || url.pathname.endsWith(".html") || url.pathname.endsWith("/")) {
+    e.respondWith(
+      fetch(e.request)
+        .then((response) => {
+          const clone = response.clone();
+          caches.open(CACHE_NAME).then((cache) => cache.put(e.request, clone));
+          return response;
+        })
+        .catch(() => caches.match(e.request))
+    );
+    return;
+  }
+
+  // For libraries: cache first, fallback to network
   e.respondWith(
     caches.match(e.request).then((cached) => {
       if (cached) return cached;
@@ -36,7 +50,7 @@ self.addEventListener("fetch", (e) => {
           caches.open(CACHE_NAME).then((cache) => cache.put(e.request, clone));
         }
         return response;
-      }).catch(() => cached);
+      });
     })
   );
 });
