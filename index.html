@@ -884,76 +884,90 @@ function ControlApp() {
   };
 
   // ─── PDF Import Handler ───
-  const handleFileImport = async (file) => {
-    if (!pdfReady || !file) return;
-    setImportState({ step: "loading", fileName: file.name });
+
+  const handleFilesImport = async (fileList) => {
+    if (!pdfReady || fileList.length === 0) return;
+    const files = Array.from(fileList);
+    setImportState({ step: "loading", fileName: files.length === 1 ? files[0].name : `${files.length} arquivos` });
+
     try {
-      const text = await extractPdfText(file);
-
-      // Try extrato first (more specific), then credit card
-      let card = detectExtrato(text);
-      let isExtrato = !!card;
-      if (!card) {
-        card = detectCardType(text);
-      }
-      if (!card) {
-        setImportState({ step: "error", message: "Não foi possível identificar o tipo de documento. Verifique se é uma fatura (Itaú/BTG) ou extrato de conta corrente." });
-        return;
-      }
-
-      let parsed;
-      let fatura;
-
-      if (isExtrato) {
-        // Extrato: each transaction determines its own fatura month
-        parsed = card === "BTG CC" ? parseBTGExtrato(text) : parseItauExtrato(text);
-        // Collect unique months
-        const months = [...new Set(parsed.map(t => t.fatura))].sort();
-        fatura = months.length > 0 ? months[months.length - 1] : null;
-        if (parsed.length === 0) {
-          setImportState({ step: "error", message: `Nenhum lançamento encontrado no extrato (${card}). Verifique se o PDF é válido.` });
-          return;
-        }
-      } else {
-        // Credit card: detect fatura month from PDF
-        fatura = detectFatura(text);
-        if (!fatura) {
-          setImportState({ step: "error", message: `Detectado como ${card}, mas não foi possível identificar o mês da fatura. Verifique se é o PDF correto.` });
-          return;
-        }
-        parsed = card === "BTG" ? parseBTG(text, fatura) : parseItau(text, card, fatura);
-      }
-
-      parsed = dedup(parsed);
-      // Apply rename map: match original PDF descriptions to user-preferred names
+      const allNew = [];
+      let totalDuplicates = 0;
+      let totalRenamed = 0;
+      const fileResults = [];
+      const errors = [];
       const currentMap = { ...renameMap };
-      parsed = parsed.map(t => {
-        const key = t.desc.toLowerCase().trim();
-        const rule = currentMap[key];
-        if (rule) return { ...t, origDesc: t.desc, desc: rule.desc, cat: rule.cat };
-        return { ...t, origDesc: t.desc };
-      });
-      // Dedup against existing transactions
+      // Build existing keys including what we add along the way
       const existingKeys = new Set(transactions.map(t =>
         `${t.date}|${(t.origDesc || t.desc).substring(0,30)}|${t.amount.toFixed(2)}|${t.card}`
       ));
-      const newOnly = parsed.filter(t => {
-        const key = `${t.date}|${(t.origDesc || t.desc).substring(0,30)}|${t.amount.toFixed(2)}|${t.card}`;
-        return !existingKeys.has(key);
-      });
-      const total = newOnly.reduce((s, t) => s + t.amount, 0);
-      const renamed = newOnly.filter(t => t.origDesc && t.origDesc !== t.desc).length;
-      // Collect all new months needed
-      const allMonths = [...new Set(newOnly.map(t => t.fatura))].sort();
+
+      for (const file of files) {
+        try {
+          const text = await extractPdfText(file);
+          let card, parsed, fatura, isExtrato;
+
+          // Auto-detect type
+          card = detectExtrato(text);
+          isExtrato = !!card;
+          if (!card) card = detectCardType(text);
+          if (!card) {
+            errors.push(`${file.name}: tipo não identificado`);
+            continue;
+          }
+
+          if (isExtrato) {
+            parsed = card === "BTG CC" ? parseBTGExtrato(text) : parseItauExtrato(text);
+            const months = [...new Set(parsed.map(t => t.fatura))].sort();
+            fatura = months.length > 0 ? months[months.length - 1] : null;
+            if (parsed.length === 0) { errors.push(`${file.name}: nenhum lançamento encontrado`); continue; }
+          } else {
+            fatura = detectFatura(text);
+            if (!fatura) { errors.push(`${file.name}: mês da fatura não identificado`); continue; }
+            parsed = card === "BTG" ? parseBTG(text, fatura) : parseItau(text, card, fatura);
+          }
+
+          parsed = dedup(parsed);
+          // Apply rename map
+          parsed = parsed.map(t => {
+            const key = t.desc.toLowerCase().trim();
+            const rule = currentMap[key];
+            if (rule) return { ...t, origDesc: t.desc, desc: rule.desc, cat: rule.cat };
+            return { ...t, origDesc: t.desc };
+          });
+          // Dedup against existing + already parsed from other files in this batch
+          const newOnly = parsed.filter(t => {
+            const key = `${t.date}|${(t.origDesc || t.desc).substring(0,30)}|${t.amount.toFixed(2)}|${t.card}`;
+            return !existingKeys.has(key);
+          });
+          // Add new keys to existing so next file in batch doesn't duplicate
+          newOnly.forEach(t => {
+            existingKeys.add(`${t.date}|${(t.origDesc || t.desc).substring(0,30)}|${t.amount.toFixed(2)}|${t.card}`);
+          });
+
+          totalDuplicates += parsed.length - newOnly.length;
+          totalRenamed += newOnly.filter(t => t.origDesc && t.origDesc !== t.desc).length;
+          allNew.push(...newOnly);
+          fileResults.push({ name: file.name, card, fatura, count: newOnly.length, isExtrato });
+        } catch (err) {
+          errors.push(`${file.name}: ${err.message}`);
+        }
+      }
+
+      const total = allNew.reduce((s, t) => s + t.amount, 0);
+      const allMonths = [...new Set(allNew.map(t => t.fatura))].sort();
       const newMonths = allMonths.filter(m => !AVAILABLE_MONTHS.some(am => am.key === m));
+      const lastFatura = allMonths.length > 0 ? allMonths[allMonths.length - 1] : null;
+
       setImportState({
-        step: "preview", card, fatura, fileName: file.name, isExtrato,
-        transactions: newOnly, total, renamed, duplicatesRemoved: parsed.length - newOnly.length,
-        newMonths, allMonths,
+        step: "preview", card: fileResults.map(f => f.card).join(", "), fatura: lastFatura,
+        fileName: files.length === 1 ? files[0].name : `${files.length} arquivos`,
+        isExtrato: false, transactions: allNew, total, renamed: totalRenamed,
+        duplicatesRemoved: totalDuplicates, newMonths, allMonths, fileResults, errors,
       });
     } catch (err) {
       console.error(err);
-      setImportState({ step: "error", message: `Erro ao processar PDF: ${err.message}` });
+      setImportState({ step: "error", message: `Erro ao processar PDFs: ${err.message}` });
     }
   };
 
@@ -1275,15 +1289,15 @@ function ControlApp() {
 
         {showUpload && (
           <div style={{ borderRadius: 16, marginBottom: 24, overflow: "hidden", border: "1px solid #1e293b", background: "#0a0e17" }}>
-            <input ref={fileInputRef} type="file" accept="application/pdf,.pdf" style={{ display: "none" }}
-              onChange={(e) => { if (e.target.files[0]) handleFileImport(e.target.files[0]); e.target.value = ""; }} />
+            <input ref={fileInputRef} type="file" accept="application/pdf,.pdf" multiple style={{ display: "none" }}
+              onChange={(e) => { if (e.target.files.length > 0) handleFilesImport(e.target.files); e.target.value = ""; }} />
 
             {/* Drop zone / file picker (only when no import in progress) */}
             {(!importState || importState.step === "error") && (
               <div
                 onDragOver={(e) => { e.preventDefault(); setUploadHover(true); }}
                 onDragLeave={() => setUploadHover(false)}
-                onDrop={(e) => { e.preventDefault(); setUploadHover(false); if (e.dataTransfer.files[0]) handleFileImport(e.dataTransfer.files[0]); }}
+                onDrop={(e) => { e.preventDefault(); setUploadHover(false); if (e.dataTransfer.files.length > 0) handleFilesImport(e.dataTransfer.files); }}
                 onClick={() => fileInputRef.current?.click()}
                 style={{ padding: 32, textAlign: "center", cursor: "pointer",
                   borderBottom: importState?.step === "error" ? "none" : undefined,
@@ -1292,7 +1306,7 @@ function ControlApp() {
                   transition: "all 0.3s" }}>
                 <div style={{ fontSize: 36, marginBottom: 8 }}>📄</div>
                 <p style={{ color: "#94a3b8", margin: 0, fontSize: 14 }}>
-                  Toque para <span style={{ color: "#0ea5e9", textDecoration: "underline" }}>selecionar o PDF</span> da fatura ou extrato
+                  Toque para <span style={{ color: "#0ea5e9", textDecoration: "underline" }}>selecionar PDFs</span> de faturas ou extratos
                 </p>
                 <p style={{ color: "#475569", margin: "8px 0 0", fontSize: 12 }}>Faturas: Itaú (Visa Infinite, Latam Pass), BTG · Extratos: Itaú CC, BTG CC</p>
               </div>
@@ -1321,13 +1335,31 @@ function ControlApp() {
                   <span style={{ fontSize: 20 }}>✅</span>
                   <div>
                     <p style={{ margin: 0, fontSize: 15, color: "#f1f5f9", fontWeight: 600 }}>{importState.fileName}</p>
-                    <p style={{ margin: "2px 0 0", fontSize: 12, color: "#64748b" }}>
-                      {importState.card} · {importState.isExtrato
-                        ? `Extrato${importState.allMonths?.length > 1 ? ` (${importState.allMonths.length} meses)` : ` ${importState.fatura}`}`
-                        : `Fatura ${importState.fatura}`}
-                    </p>
+                    {importState.fileResults && importState.fileResults.length > 1 && (
+                      <div style={{ margin: "6px 0 0" }}>
+                        {importState.fileResults.map((f, i) => (
+                          <p key={i} style={{ margin: "2px 0", fontSize: 11, color: "#64748b" }}>
+                            {f.name}: {f.card} · {f.count} novos
+                          </p>
+                        ))}
+                      </div>
+                    )}
+                    {importState.fileResults && importState.fileResults.length === 1 && (
+                      <p style={{ margin: "2px 0 0", fontSize: 12, color: "#64748b" }}>
+                        {importState.fileResults[0].card} · {importState.fileResults[0].isExtrato
+                          ? `Extrato${importState.allMonths?.length > 1 ? ` (${importState.allMonths.length} meses)` : ` ${importState.fileResults[0].fatura}`}`
+                          : `Fatura ${importState.fileResults[0].fatura}`}
+                      </p>
+                    )}
                   </div>
                 </div>
+                {importState.errors && importState.errors.length > 0 && (
+                  <div style={{ marginBottom: 12, padding: "8px 12px", background: "rgba(239,68,68,0.08)", borderRadius: 8 }}>
+                    {importState.errors.map((err, i) => (
+                      <p key={i} style={{ margin: "2px 0", fontSize: 11, color: "#f87171" }}>⚠️ {err}</p>
+                    ))}
+                  </div>
+                )}
                 <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 12, marginBottom: 16 }}>
                   <div style={{ background: "#111827", borderRadius: 10, padding: "12px 14px", textAlign: "center" }}>
                     <p style={{ margin: 0, fontSize: 22, color: "#f1f5f9", fontWeight: 700 }}>{importState.transactions.length}</p>
