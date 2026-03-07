@@ -293,15 +293,18 @@ function dedup(txns) {
 function detectExtrato(text) {
   if (!text || typeof text !== "string") return null;
   const t = text.toLowerCase();
-  // Exclude credit card PDFs: they have these keywords
-  const isCreditCard = ["visa infinite","visa  infinite","latam pass","latampass",
-    "cartão black","vencimento","limite de crédito","limite de credito",
-    "pagamento mínimo","pagamento minimo","fatura de","total da fatura",
-    "mastercard","visa platinum","visa gold","visa signature"].some(kw => t.includes(kw));
-  if (isCreditCard) return null;
+  // Credit card PDFs have card brand + billing keywords together
+  const hasCardBrand = ["visa infinite","visa  infinite","latam pass","latampass",
+    "cartão black","mastercard","visa platinum","visa gold","visa signature"].some(kw => t.includes(kw));
+  const hasBillingKeyword = ["limite de crédito","limite de credito",
+    "pagamento mínimo","pagamento minimo","total da fatura"].some(kw => t.includes(kw));
+  // Only exclude if it has a card brand OR multiple billing keywords (not just "vencimento" or "fatura de")
+  if (hasCardBrand || hasBillingKeyword) return null;
   if (t.includes("btg pactual") && (t.includes("extrato") || t.includes("conta corrente"))) return "BTG CC";
   if (t.includes("itaú") || t.includes("itau")) {
-    if (t.includes("extrato") || t.includes("saldo do dia") || t.includes("saldo em conta") || t.includes("conta corrente"))
+    if (t.includes("extrato") || t.includes("saldo do dia") || t.includes("saldo em conta") 
+      || t.includes("conta corrente") || t.includes("lançamentos em conta") || t.includes("lancamentos em conta")
+      || t.includes("saldo anterior") || t.includes("saldo disponível") || t.includes("saldo disponivel"))
       return "Itaú CC";
   }
   return null;
@@ -898,11 +901,15 @@ function ControlApp() {
         // Collect unique months
         const months = [...new Set(parsed.map(t => t.fatura))].sort();
         fatura = months.length > 0 ? months[months.length - 1] : null;
+        if (parsed.length === 0) {
+          setImportState({ step: "error", message: `Nenhum lançamento encontrado no extrato (${card}). Verifique se o PDF é válido.` });
+          return;
+        }
       } else {
         // Credit card: detect fatura month from PDF
         fatura = detectFatura(text);
         if (!fatura) {
-          setImportState({ step: "error", message: "Não foi possível identificar o mês da fatura." });
+          setImportState({ step: "error", message: `Detectado como ${card}, mas não foi possível identificar o mês da fatura. Verifique se é o PDF correto.` });
           return;
         }
         parsed = card === "BTG" ? parseBTG(text, fatura) : parseItau(text, card, fatura);
