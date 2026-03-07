@@ -293,20 +293,29 @@ function dedup(txns) {
 function detectExtrato(text) {
   if (!text || typeof text !== "string") return null;
   const t = text.toLowerCase();
-  // Credit card PDFs have card brand + billing keywords together
-  const hasCardBrand = ["visa infinite","visa  infinite","latam pass","latampass",
-    "cartão black","mastercard","visa platinum","visa gold","visa signature"].some(kw => t.includes(kw));
-  const hasBillingKeyword = ["limite de crédito","limite de credito",
-    "pagamento mínimo","pagamento minimo","total da fatura"].some(kw => t.includes(kw));
-  // Only exclude if it has a card brand OR multiple billing keywords (not just "vencimento" or "fatura de")
-  if (hasCardBrand || hasBillingKeyword) return null;
-  if (t.includes("btg pactual") && (t.includes("extrato") || t.includes("conta corrente"))) return "BTG CC";
-  if (t.includes("itaú") || t.includes("itau")) {
-    if (t.includes("extrato") || t.includes("saldo do dia") || t.includes("saldo em conta") 
-      || t.includes("conta corrente") || t.includes("lançamentos em conta") || t.includes("lancamentos em conta")
-      || t.includes("saldo anterior") || t.includes("saldo disponível") || t.includes("saldo disponivel"))
-      return "Itaú CC";
+  
+  // Check for STRONG extrato indicators first — these take priority
+  const extratoKeywords = ["saldo do dia","saldo em conta","conta corrente","saldo anterior",
+    "saldo disponível","saldo disponivel","lançamentos em conta","lancamentos em conta",
+    "saldo final","saldo inicial","saldo parcial"];
+  const hasExtratoIndicator = extratoKeywords.some(kw => t.includes(kw));
+  
+  // If it has strong extrato indicators, it's an extrato regardless of other keywords
+  if (hasExtratoIndicator) {
+    if (t.includes("btg pactual")) return "BTG CC";
+    if (t.includes("itaú") || t.includes("itau")) return "Itaú CC";
   }
+  
+  // Also check "extrato" keyword but only if no card brand is present
+  if (t.includes("extrato")) {
+    if (t.includes("btg pactual")) return "BTG CC";
+    if ((t.includes("itaú") || t.includes("itau")) && 
+        !["visa infinite","visa  infinite","latam pass","latampass","cartão black",
+          "mastercard","visa platinum","visa gold"].some(kw => t.includes(kw))) {
+      return "Itaú CC";
+    }
+  }
+  
   return null;
 }
 
