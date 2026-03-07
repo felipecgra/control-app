@@ -1328,13 +1328,19 @@ function ControlApp() {
                 </div>
                 {importState.duplicatesRemoved > 0 && (
                   <p style={{ margin: "0 0 12px", fontSize: 12, color: "#475569" }}>
-                    🔄 {importState.duplicatesRemoved} duplicatas já existentes foram ignoradas
+                    🔄 {importState.duplicatesRemoved} lançamentos já existentes foram ignorados
                   </p>
                 )}
                 {importState.transactions.length === 0 ? (
-                  <p style={{ margin: 0, fontSize: 13, color: "#f59e0b" }}>
-                    ⚠️ Todas as transações desta fatura já foram importadas anteriormente.
-                  </p>
+                  <div>
+                    <p style={{ margin: "0 0 16px", fontSize: 13, color: "#64748b" }}>
+                      ✓ Todos os lançamentos deste arquivo já estão no app.
+                    </p>
+                    <button onClick={() => { setImportState(null); if (fileInputRef.current) fileInputRef.current.value = ""; }}
+                      style={{ padding: "10px 20px", borderRadius: 10, background: "transparent", border: "1px solid #1e293b", color: "#94a3b8", fontSize: 13, fontWeight: 500, cursor: "pointer", fontFamily: "inherit" }}>
+                      Ok
+                    </button>
+                  </div>
                 ) : (
                   <div style={{ display: "flex", gap: 12, justifyContent: "flex-end" }}>
                     <button onClick={() => { setImportState(null); if (fileInputRef.current) fileInputRef.current.value = ""; }}
