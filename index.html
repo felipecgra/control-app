@@ -451,8 +451,8 @@ function DonutChart({ categories, totalSpend }) {
   const radius = (size - strokeWidth) / 2;
   const circumference = 2 * Math.PI * radius;
   const safeTotalSpend = totalSpend || 1;
+  const cx = size / 2, cy = size / 2;
 
-  // Build segments with offsets
   const segments = [];
   let offset = 0;
   categories.forEach((cat) => {
@@ -464,15 +464,16 @@ function DonutChart({ categories, totalSpend }) {
 
   return (
     <svg width={size} height={size} viewBox={`0 0 ${size} ${size}`}>
-      <circle cx={size/2} cy={size/2} r={radius} fill="none" stroke="#1a1f2e" strokeWidth={strokeWidth} />
+      <circle cx={cx} cy={cy} r={radius} fill="none" stroke="#1a1f2e" strokeWidth={strokeWidth} />
       {segments.map((seg) => (
-        <circle key={seg.name} cx={size/2} cy={size/2} r={radius} fill="none"
+        <circle key={seg.name} cx={cx} cy={cy} r={radius} fill="none"
           stroke={seg.color} strokeWidth={strokeWidth}
-          strokeDasharray={`${seg.dash} ${seg.gap}`} strokeDashoffset={-seg.offset} strokeLinecap="butt"
-          style={{ transform: "rotate(-90deg)", transformOrigin: "center" }} />
+          strokeDasharray={`${seg.dash} ${seg.gap}`}
+          strokeDashoffset={circumference * 0.25 - seg.offset}
+          strokeLinecap="butt" />
       ))}
-      <text x={size/2} y={size/2 - 10} textAnchor="middle" fill="#94a3b8" fontSize="11" fontFamily="inherit">Total</text>
-      <text x={size/2} y={size/2 + 14} textAnchor="middle" fill="#f1f5f9" fontSize="18" fontWeight="700" fontFamily="inherit">{fmtK(totalSpend)}</text>
+      <text x={cx} y={cy - 10} textAnchor="middle" fill="#94a3b8" fontSize="11" fontFamily="inherit">Total</text>
+      <text x={cx} y={cy + 14} textAnchor="middle" fill="#f1f5f9" fontSize="18" fontWeight="700" fontFamily="inherit">{fmtK(totalSpend)}</text>
     </svg>
   );
 }
