@@ -450,24 +450,27 @@ function DonutChart({ categories, totalSpend }) {
   const size = 200, strokeWidth = 32;
   const radius = (size - strokeWidth) / 2;
   const circumference = 2 * Math.PI * radius;
-  let offset = 0;
   const safeTotalSpend = totalSpend || 1;
+
+  // Build segments with offsets
+  const segments = [];
+  let offset = 0;
+  categories.forEach((cat) => {
+    const pct = cat.total / safeTotalSpend;
+    const dash = pct * circumference;
+    segments.push({ name: cat.name, color: cat.color, dash, gap: circumference - dash, offset });
+    offset += dash;
+  });
+
   return (
     <svg width={size} height={size} viewBox={`0 0 ${size} ${size}`}>
       <circle cx={size/2} cy={size/2} r={radius} fill="none" stroke="#1a1f2e" strokeWidth={strokeWidth} />
-      {categories.map((cat) => {
-        const pct = cat.total / safeTotalSpend;
-        const dash = pct * circumference;
-        const gap = circumference - dash;
-        const el = (
-          <circle key={cat.name} cx={size/2} cy={size/2} r={radius} fill="none"
-            stroke={cat.color} strokeWidth={strokeWidth}
-            strokeDasharray={`${dash} ${gap}`} strokeDashoffset={-offset} strokeLinecap="butt"
-            style={{ transform: "rotate(-90deg)", transformOrigin: "center", transition: "all 0.6s ease" }} />
-        );
-        offset += dash;
-        return el;
-      })}
+      {segments.map((seg) => (
+        <circle key={seg.name} cx={size/2} cy={size/2} r={radius} fill="none"
+          stroke={seg.color} strokeWidth={strokeWidth}
+          strokeDasharray={`${seg.dash} ${seg.gap}`} strokeDashoffset={-seg.offset} strokeLinecap="butt"
+          style={{ transform: "rotate(-90deg)", transformOrigin: "center" }} />
+      ))}
       <text x={size/2} y={size/2 - 10} textAnchor="middle" fill="#94a3b8" fontSize="11" fontFamily="inherit">Total</text>
       <text x={size/2} y={size/2 + 14} textAnchor="middle" fill="#f1f5f9" fontSize="18" fontWeight="700" fontFamily="inherit">{fmtK(totalSpend)}</text>
     </svg>
@@ -1005,21 +1008,23 @@ function ControlApp() {
     const visibleMonths = ALL_SEARCH_MONTHS.slice(-numMonths);
     const visibleKeys = new Set(visibleMonths.map(m => m.key));
 
+    const getMonthKey = (t) => viewMode === "pagamento"
+      ? (t.fatura || (t.date ? t.date.substring(0, 7) : ""))
+      : (t.date ? t.date.substring(0, 7) : (t.fatura || ""));
+
     const allTxns = [...HISTORICAL_TRANSACTIONS, ...transactions];
     const matches = allTxns.filter(t => {
       if (!t.desc.toLowerCase().includes(q) && !(t.cat && t.cat.toLowerCase().includes(q))) return false;
-      const dateMonth = t.date ? t.date.substring(0, 7) : "";
-      const faturaMonth = t.fatura || "";
-      return visibleKeys.has(dateMonth) || visibleKeys.has(faturaMonth);
+      return visibleKeys.has(getMonthKey(t));
     });
 
     const byMonth = {};
     visibleMonths.forEach(m => { byMonth[m.key] = { label: m.label, total: 0, transactions: [] }; });
     matches.forEach(t => {
-      const monthKey = t.date ? t.date.substring(0, 7) : (t.fatura || "");
-      if (byMonth[monthKey]) {
-        byMonth[monthKey].total += t.amount;
-        byMonth[monthKey].transactions.push(t);
+      const mk = getMonthKey(t);
+      if (byMonth[mk]) {
+        byMonth[mk].total += t.amount;
+        byMonth[mk].transactions.push(t);
       }
     });
 
