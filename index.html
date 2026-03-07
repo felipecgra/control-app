@@ -93,7 +93,7 @@ const INITIAL_HOLDINGS = [];
 
 const MOCK_MONTHLY_PORTFOLIO = [];
 
-const CARD_COLORS = { "Itaú LP": "#F97316", "Visa Inf": "#1e3a5f", "BTG": "#0091EA", "BTG CC": "#00B8D4", "Itaú CC": "#FF6D00" };
+const CARD_COLORS = { "Itaú LP": "#F97316", "Visa Inf": "#1e3a5f", "BTG": "#0091EA", "BTG CC": "#00B8D4", "Itaú CC": "#FF6D00", "Itaú Plat": "#94A3B8", "Itaú Gold": "#FBBF24", "Itaú MC": "#EB5757" };
 
 // ─── PDF Parser Engine ───
 
@@ -175,7 +175,11 @@ function detectCardType(text) {
   if (t.includes("btg pactual") || t.includes("cartão black") || t.includes("btg pactual s.a")) return "BTG";
   if (t.includes("visa infinite") || t.includes("visa  infinite")) return "Visa Inf";
   if (t.includes("latam pass") || t.includes("latampass")) return "Itaú LP";
-  if (t.includes("itaucard") || t.includes("itaú")) return "Itaú LP";
+  // Generic Itaú credit card — try to identify by card variant
+  if (t.includes("visa platinum")) return "Itaú Plat";
+  if (t.includes("visa gold")) return "Itaú Gold";
+  if (t.includes("mastercard") && (t.includes("itaú") || t.includes("itau"))) return "Itaú MC";
+  if (t.includes("itaucard") || t.includes("itaú") || t.includes("itau")) return "Itaú LP";
   return null;
 }
 
@@ -289,9 +293,15 @@ function dedup(txns) {
 function detectExtrato(text) {
   if (!text || typeof text !== "string") return null;
   const t = text.toLowerCase();
+  // Exclude credit card PDFs: they have these keywords
+  const isCreditCard = ["visa infinite","visa  infinite","latam pass","latampass",
+    "cartão black","vencimento","limite de crédito","limite de credito",
+    "pagamento mínimo","pagamento minimo","fatura de","total da fatura",
+    "mastercard","visa platinum","visa gold","visa signature"].some(kw => t.includes(kw));
+  if (isCreditCard) return null;
   if (t.includes("btg pactual") && (t.includes("extrato") || t.includes("conta corrente"))) return "BTG CC";
   if (t.includes("itaú") || t.includes("itau")) {
-    if (t.includes("extrato") || t.includes("lançamentos") || t.includes("saldo do dia") || t.includes("saldo em conta"))
+    if (t.includes("extrato") || t.includes("saldo do dia") || t.includes("saldo em conta") || t.includes("conta corrente"))
       return "Itaú CC";
   }
   return null;
@@ -987,27 +997,30 @@ function ControlApp() {
 
   const getSearchResults = () => {
     if (!searchQuery || searchQuery.length < 2 || !searchConfirmed) return null;
-    const q = searchQuery.toLowerCase();
+    const q = searchQuery.toLowerCase().trim();
+    if (!q) return null;
 
     // Determine how many months to show based on period
     const periodMap = { "1M": 1, "3M": 3, "6M": 6, "12M": 12 };
     const numMonths = periodMap[searchPeriod] || 6;
     const visibleMonths = ALL_SEARCH_MONTHS.slice(-numMonths);
-
-    // Filter transactions matching query AND within visible months
     const visibleKeys = new Set(visibleMonths.map(m => m.key));
-    const matches = [...HISTORICAL_TRANSACTIONS, ...transactions].filter(t => {
+
+    // Filter transactions matching query AND within visible months (check both date and fatura)
+    const allTxns = [...HISTORICAL_TRANSACTIONS, ...transactions];
+    const matches = allTxns.filter(t => {
       if (!t.desc.toLowerCase().includes(q) && !(t.cat && t.cat.toLowerCase().includes(q))) return false;
-      const monthKey = t.date.substring(0, 7);
-      return visibleKeys.has(monthKey);
+      const dateMonth = t.date ? t.date.substring(0, 7) : "";
+      const faturaMonth = t.fatura || "";
+      return visibleKeys.has(dateMonth) || visibleKeys.has(faturaMonth);
     });
     if (matches.length === 0) return null;
 
-    // Group by month
+    // Group by month (use date month for grouping)
     const byMonth = {};
     visibleMonths.forEach(m => { byMonth[m.key] = { label: m.label, total: 0, transactions: [] }; });
     matches.forEach(t => {
-      const monthKey = t.date.substring(0, 7);
+      const monthKey = t.date ? t.date.substring(0, 7) : (t.fatura || "");
       if (byMonth[monthKey]) {
         byMonth[monthKey].total += t.amount;
         byMonth[monthKey].transactions.push(t);
@@ -1083,16 +1096,27 @@ function ControlApp() {
             <input type="text" value={searchQuery}
               onChange={(e) => { setSearchQuery(e.target.value); setSearchConfirmed(false); }}
               onKeyDown={(e) => {
-                if (e.key === "Enter" && searchQuery.length >= 2) setSearchConfirmed(true);
+                if (e.key === "Enter" && searchQuery.length >= 2) { setSearchConfirmed(true); e.target.blur(); }
               }}
               placeholder="Buscar lançamento ou categoria..."
               autoFocus
-              style={{ ...inputStyle, paddingLeft: 40, fontSize: 15, padding: "14px 14px 14px 40px", borderRadius: searchQuery && !searchConfirmed && searchSuggestions.length > 0 ? "12px 12px 0 0" : 12, background: "#0f1219", border: "1px solid #1e293b", position: "relative", zIndex: 2 }} />
+              style={{ ...inputStyle, paddingLeft: 40, fontSize: 15, padding: "14px 14px 14px 40px", borderRadius: searchQuery && !searchConfirmed && searchSuggestions.length > 0 ? "12px 12px 0 0" : 12, background: "#0f1219", border: "1px solid #1e293b", position: "relative", zIndex: 2, paddingRight: searchQuery ? 80 : 14 }} />
             {searchQuery && (
-              <button onClick={() => { setSearchQuery(""); setSearchConfirmed(false); }}
-                style={{ position: "absolute", right: 12, top: "50%", transform: "translateY(-50%)", background: "none", border: "none", color: "#475569", cursor: "pointer", fontSize: 16, padding: 4, zIndex: 3 }}>
-                ✕
-              </button>
+              <div style={{ position: "absolute", right: 8, top: "50%", transform: "translateY(-50%)", display: "flex", gap: 4, zIndex: 3 }}>
+                {searchQuery.length >= 2 && !searchConfirmed && (
+                  <button
+                    onMouseDown={(e) => { e.preventDefault(); setSearchConfirmed(true); }}
+                    onTouchEnd={(e) => { e.preventDefault(); setSearchConfirmed(true); }}
+                    style={{ background: "#0ea5e9", border: "none", color: "#fff", borderRadius: 6, fontSize: 11, padding: "4px 10px", cursor: "pointer", fontFamily: "inherit", fontWeight: 600 }}>
+                    Ir
+                  </button>
+                )}
+                <button
+                  onMouseDown={(e) => { e.preventDefault(); setSearchQuery(""); setSearchConfirmed(false); }}
+                  style={{ background: "none", border: "none", color: "#475569", cursor: "pointer", fontSize: 16, padding: 4 }}>
+                  ✕
+                </button>
+              </div>
             )}
 
             {/* Autocomplete dropdown */}
@@ -1100,7 +1124,8 @@ function ControlApp() {
               <div style={{ position: "absolute", left: 0, right: 0, top: "100%", background: "#0f1219", border: "1px solid #1e293b", borderTop: "1px solid #1a2030", borderRadius: "0 0 12px 12px", zIndex: 10, maxHeight: 320, overflowY: "auto" }}>
                 {searchSuggestions.map((s, i) => (
                   <button key={s.type + s.label + i}
-                    onClick={() => { setSearchQuery(s.label); setSearchConfirmed(true); }}
+                    onMouseDown={(e) => { e.preventDefault(); setSearchQuery(s.label); setSearchConfirmed(true); }}
+                    onTouchEnd={(e) => { e.preventDefault(); setSearchQuery(s.label); setSearchConfirmed(true); }}
                     style={{ display: "flex", alignItems: "center", gap: 10, width: "100%", padding: "10px 16px", background: "transparent", border: "none", borderBottom: i < searchSuggestions.length - 1 ? "1px solid #111827" : "none", color: "#e2e8f0", fontSize: 13, cursor: "pointer", fontFamily: "inherit", textAlign: "left", transition: "background 0.1s" }}
                     onMouseEnter={(e) => e.currentTarget.style.background = "#111827"}
                     onMouseLeave={(e) => e.currentTarget.style.background = "transparent"}>
