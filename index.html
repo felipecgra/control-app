@@ -595,7 +595,7 @@ function ControlApp() {
   const [searchQuery, setSearchQuery] = useState("");
   const [searchActive, setSearchActive] = useState(false);
   const [searchPeriod, setSearchPeriod] = useState("6M");
-  const [searchConfirmed, setSearchConfirmed] = useState(false);
+  const [searchTerm, setSearchTerm] = useState(""); // actual term being searched
   const [showMonthPicker, setShowMonthPicker] = useState(false);
   const [transactions, setTransactions] = useState(ALL_TRANSACTIONS);
   const [editingTx, setEditingTx] = useState(null); // { index, desc, cat }
@@ -996,17 +996,15 @@ function ControlApp() {
   }, [searchQuery, transactions, categoryMeta]);
 
   const getSearchResults = () => {
-    if (!searchQuery || searchQuery.length < 2 || !searchConfirmed) return null;
-    const q = searchQuery.toLowerCase().trim();
+    if (!searchTerm || searchTerm.length < 2) return null;
+    const q = searchTerm.toLowerCase().trim();
     if (!q) return null;
 
-    // Determine how many months to show based on period
     const periodMap = { "1M": 1, "3M": 3, "6M": 6, "12M": 12 };
     const numMonths = periodMap[searchPeriod] || 6;
     const visibleMonths = ALL_SEARCH_MONTHS.slice(-numMonths);
     const visibleKeys = new Set(visibleMonths.map(m => m.key));
 
-    // Filter transactions matching query AND within visible months (check both date and fatura)
     const allTxns = [...HISTORICAL_TRANSACTIONS, ...transactions];
     const matches = allTxns.filter(t => {
       if (!t.desc.toLowerCase().includes(q) && !(t.cat && t.cat.toLowerCase().includes(q))) return false;
@@ -1014,9 +1012,7 @@ function ControlApp() {
       const faturaMonth = t.fatura || "";
       return visibleKeys.has(dateMonth) || visibleKeys.has(faturaMonth);
     });
-    if (matches.length === 0) return null;
 
-    // Group by month (use date month for grouping)
     const byMonth = {};
     visibleMonths.forEach(m => { byMonth[m.key] = { label: m.label, total: 0, transactions: [] }; });
     matches.forEach(t => {
@@ -1029,9 +1025,7 @@ function ControlApp() {
 
     const monthlyData = visibleMonths.map(m => ({ month: m.label, total: byMonth[m.key].total, transactions: byMonth[m.key].transactions }));
     const totalAll = matches.reduce((s, t) => s + t.amount, 0);
-    const avgMonth = totalAll / numMonths;
-
-    // Find unique merchant names that match
+    const avgMonth = numMonths > 0 ? totalAll / numMonths : 0;
     const merchants = [...new Set(matches.map(t => t.desc))];
 
     return { monthlyData, matches, totalAll, avgMonth, merchants };
@@ -1083,50 +1077,39 @@ function ControlApp() {
 
     // Search results view
     if (searchActive) {
+      const showDropdown = searchQuery.length >= 1 && searchQuery !== searchTerm && searchSuggestions.length > 0;
+      const doSearch = (term) => { setSearchTerm(term); setSearchQuery(term); };
       return (
         <div style={{ animation: "slideIn 0.3s ease" }}>
-          <button onClick={() => { setSearchActive(false); setSearchQuery(""); setSearchConfirmed(false); }}
+          <button onClick={() => { setSearchActive(false); setSearchQuery(""); setSearchTerm(""); }}
             style={{ background: "none", border: "none", color: "#0ea5e9", cursor: "pointer", fontSize: 14, padding: "0 0 16px", display: "flex", alignItems: "center", gap: 6, fontFamily: "inherit" }}>
             ← Voltar
           </button>
 
-          {/* Search input with autocomplete */}
+          {/* Search input */}
           <div style={{ position: "relative", marginBottom: 24 }}>
             <span style={{ position: "absolute", left: 14, top: "50%", transform: "translateY(-50%)", color: "#475569", fontSize: 16, pointerEvents: "none", zIndex: 2 }}>🔍</span>
             <input type="text" value={searchQuery}
-              onChange={(e) => { setSearchQuery(e.target.value); setSearchConfirmed(false); }}
-              onKeyDown={(e) => {
-                if (e.key === "Enter" && searchQuery.length >= 2) { setSearchConfirmed(true); e.target.blur(); }
-              }}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              onKeyDown={(e) => { if (e.key === "Enter" && searchQuery.length >= 2) { doSearch(searchQuery); e.target.blur(); } }}
               placeholder="Buscar lançamento ou categoria..."
               autoFocus
-              style={{ ...inputStyle, paddingLeft: 40, fontSize: 15, padding: "14px 14px 14px 40px", borderRadius: searchQuery && !searchConfirmed && searchSuggestions.length > 0 ? "12px 12px 0 0" : 12, background: "#0f1219", border: "1px solid #1e293b", position: "relative", zIndex: 2, paddingRight: searchQuery ? 80 : 14 }} />
+              style={{ ...inputStyle, paddingLeft: 40, fontSize: 15, padding: "14px 14px 14px 40px", borderRadius: showDropdown ? "12px 12px 0 0" : 12, background: "#0f1219", border: "1px solid #1e293b", position: "relative", zIndex: 2 }} />
             {searchQuery && (
-              <div style={{ position: "absolute", right: 8, top: "50%", transform: "translateY(-50%)", display: "flex", gap: 4, zIndex: 3 }}>
-                {searchQuery.length >= 2 && !searchConfirmed && (
-                  <button
-                    onMouseDown={(e) => { e.preventDefault(); setSearchConfirmed(true); }}
-                    onTouchEnd={(e) => { e.preventDefault(); setSearchConfirmed(true); }}
-                    style={{ background: "#0ea5e9", border: "none", color: "#fff", borderRadius: 6, fontSize: 11, padding: "4px 10px", cursor: "pointer", fontFamily: "inherit", fontWeight: 600 }}>
-                    Ir
-                  </button>
-                )}
-                <button
-                  onMouseDown={(e) => { e.preventDefault(); setSearchQuery(""); setSearchConfirmed(false); }}
-                  style={{ background: "none", border: "none", color: "#475569", cursor: "pointer", fontSize: 16, padding: 4 }}>
-                  ✕
-                </button>
-              </div>
+              <button onMouseDown={(e) => { e.preventDefault(); setSearchQuery(""); setSearchTerm(""); }}
+                style={{ position: "absolute", right: 12, top: "50%", transform: "translateY(-50%)", background: "none", border: "none", color: "#475569", cursor: "pointer", fontSize: 16, padding: 4, zIndex: 3 }}>
+                ✕
+              </button>
             )}
 
-            {/* Autocomplete dropdown */}
-            {searchQuery && !searchConfirmed && searchSuggestions.length > 0 && (
-              <div style={{ position: "absolute", left: 0, right: 0, top: "100%", background: "#0f1219", border: "1px solid #1e293b", borderTop: "1px solid #1a2030", borderRadius: "0 0 12px 12px", zIndex: 10, maxHeight: 320, overflowY: "auto" }}>
+            {/* Suggestions dropdown */}
+            {showDropdown && (
+              <div style={{ position: "absolute", left: 0, right: 0, top: "100%", background: "#0f1219", border: "1px solid #1e293b", borderTop: "1px solid #1a2030", borderRadius: "0 0 12px 12px", zIndex: 10, maxHeight: 320, overflowY: "auto", WebkitOverflowScrolling: "touch" }}>
                 {searchSuggestions.map((s, i) => (
-                  <button key={s.type + s.label + i}
-                    onMouseDown={(e) => { e.preventDefault(); setSearchQuery(s.label); setSearchConfirmed(true); }}
-                    onTouchEnd={(e) => { e.preventDefault(); setSearchQuery(s.label); setSearchConfirmed(true); }}
-                    style={{ display: "flex", alignItems: "center", gap: 10, width: "100%", padding: "10px 16px", background: "transparent", border: "none", borderBottom: i < searchSuggestions.length - 1 ? "1px solid #111827" : "none", color: "#e2e8f0", fontSize: 13, cursor: "pointer", fontFamily: "inherit", textAlign: "left", transition: "background 0.1s" }}
+                  <div key={s.type + s.label + i}
+                    onTouchEnd={(e) => { e.preventDefault(); doSearch(s.label); }}
+                    onMouseDown={(e) => { e.preventDefault(); doSearch(s.label); }}
+                    style={{ display: "flex", alignItems: "center", gap: 10, width: "100%", padding: "10px 16px", borderBottom: i < searchSuggestions.length - 1 ? "1px solid #111827" : "none", color: "#e2e8f0", fontSize: 13, cursor: "pointer", userSelect: "none", WebkitUserSelect: "none" }}
                     onMouseEnter={(e) => e.currentTarget.style.background = "#111827"}
                     onMouseLeave={(e) => e.currentTarget.style.background = "transparent"}>
                     <span style={{ fontSize: 16, width: 24, textAlign: "center" }}>{s.icon}</span>
@@ -1134,18 +1117,18 @@ function ControlApp() {
                     <span style={{ fontSize: 10, color: "#475569", padding: "2px 8px", borderRadius: 4, background: "#111827", flexShrink: 0 }}>
                       {s.type === "cat" ? "categoria" : s.cat || ""}
                     </span>
-                  </button>
+                  </div>
                 ))}
               </div>
             )}
           </div>
 
-          {searchConfirmed && searchResults ? (
+          {searchTerm && searchResults ? (
             <>
               {/* Summary */}
               <div style={{ marginBottom: 20 }}>
                 <h2 style={{ margin: 0, fontSize: 18, color: "#f1f5f9", fontWeight: 600 }}>
-                  {searchResults.merchants.length === 1 ? searchResults.merchants[0] : `"${searchQuery}"`}
+                  {searchResults.merchants.length === 1 ? searchResults.merchants[0] : `"${searchTerm}"`}
                 </h2>
                 <div style={{ display: "flex", gap: 20, marginTop: 8 }}>
                   <div>
@@ -1238,9 +1221,9 @@ function ControlApp() {
             <div style={{ textAlign: "center", padding: "60px 20px" }}>
               <div style={{ fontSize: 40, marginBottom: 12, opacity: 0.4 }}>🔍</div>
               <p style={{ color: "#475569", fontSize: 14 }}>
-                {!searchConfirmed
+                {!searchTerm
                   ? "Digite e selecione uma opção da lista..."
-                  : `Nenhum lançamento encontrado para "${searchQuery}"`}
+                  : `Nenhum lançamento encontrado para "${searchTerm}"`}
               </p>
             </div>
           )}
@@ -1767,7 +1750,7 @@ function ControlApp() {
       <div style={{ display: "flex", gap: 4, padding: isMobile ? "12px 16px" : "16px 28px", borderBottom: "1px solid #111827", marginBottom: isMobile ? 16 : 24, overflowX: "auto" }}>
         {tabs.map(tab => (
           <button key={tab.id}
-            onClick={() => { setActiveTab(tab.id); setSelectedCategory(null); setSearchActive(false); setSearchQuery(""); setSearchConfirmed(false); }}
+            onClick={() => { setActiveTab(tab.id); setSelectedCategory(null); setSearchActive(false); setSearchQuery(""); setSearchTerm(""); }}
             style={{
               background: activeTab === tab.id ? "#0ea5e9" : "transparent",
               border: activeTab === tab.id ? "none" : "1px solid #1e293b",
