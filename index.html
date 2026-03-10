@@ -195,11 +195,51 @@ function detectFatura(text) {
     const y = parseInt(venc[3]);
     return `${y}-${String(m).padStart(2,"0")}`;
   }
+  // Try DD/MM/YYYY near "vencimento" with more spacing
+  const venc2 = text.match(/vencimento[\s\S]{0,30}?(\d{2})\/(\d{2})\/(\d{4})/i);
+  if (venc2) {
+    const m = parseInt(venc2[2]);
+    const y = parseInt(venc2[3]);
+    return `${y}-${String(m).padStart(2,"0")}`;
+  }
   // Try "Fatura de MONTH YEAR"
   const fm = text.match(/fatura\s+(?:de\s+)?(janeiro|fevereiro|março|marco|abril|maio|junho|julho|agosto|setembro|outubro|novembro|dezembro)\s+(?:de\s+)?(\d{4})/i);
   if (fm) {
     const m = monthMap[fm[1].toLowerCase()];
     return `${fm[2]}-${m}`;
+  }
+  // Try "MONTH/YEAR" or "MONTH YEAR" near "fatura" or "referência" or "período"
+  const ref = text.match(/(?:fatura|referência|referencia|período|periodo)[\s\S]{0,30}?(janeiro|fevereiro|março|marco|abril|maio|junho|julho|agosto|setembro|outubro|novembro|dezembro|jan|fev|mar|abr|mai|jun|jul|ago|set|out|nov|dez)[\s\/\.]+(\d{4})/i);
+  if (ref) {
+    const m = monthMap[ref[1].toLowerCase()];
+    if (m) return `${ref[2]}-${m}`;
+  }
+  // Try MM/YYYY pattern near billing keywords
+  const mmyyyy = text.match(/(?:vencimento|fatura|referência|referencia|período|periodo)[\s\S]{0,30}?(\d{2})\/(\d{4})/i);
+  if (mmyyyy) {
+    return `${mmyyyy[2]}-${mmyyyy[1]}`;
+  }
+  // Last resort: find the most common DD/MM date pattern and use the fatura month from it
+  const dates = [];
+  const dateRe = /(\d{2})\/(\d{2})/g;
+  let dm;
+  while ((dm = dateRe.exec(text)) !== null) {
+    const dd = parseInt(dm[1]), mm = parseInt(dm[2]);
+    if (dd >= 1 && dd <= 31 && mm >= 1 && mm <= 12) dates.push(mm);
+  }
+  if (dates.length > 5) {
+    // Find most common month — that's likely the billing month
+    const freq = {};
+    dates.forEach(m => { freq[m] = (freq[m] || 0) + 1; });
+    const topMonth = Object.entries(freq).sort((a, b) => b[1] - a[1])[0];
+    if (topMonth) {
+      // Fatura is typically the month AFTER the most common transaction month
+      let faturaMonth = parseInt(topMonth[0]) + 1;
+      const now = new Date();
+      let faturaYear = now.getFullYear();
+      if (faturaMonth > 12) { faturaMonth = 1; faturaYear++; }
+      return `${faturaYear}-${String(faturaMonth).padStart(2,"0")}`;
+    }
   }
   return null;
 }
@@ -893,28 +933,51 @@ function ControlApp() {
           const text = await extractPdfText(file);
           let card, parsed, fatura, isExtrato;
 
-          // Auto-detect type: credit card first (has strong brand signals), then extrato
-          card = detectCardType(text);
-          isExtrato = false;
-          if (!card) {
-            card = detectExtrato(text);
-            isExtrato = !!card;
+          // Try to parse as both types and pick whichever finds transactions
+          const tryParse = (asExtrato) => {
+            let c, p, f;
+            if (asExtrato) {
+              const t = text.toLowerCase();
+              if (t.includes("btg pactual")) c = "BTG CC";
+              else c = "Itaú CC";
+              p = c === "BTG CC" ? parseBTGExtrato(text) : parseItauExtrato(text);
+              const months = [...new Set(p.map(t => t.fatura))].sort();
+              f = months.length > 0 ? months[months.length - 1] : null;
+            } else {
+              c = detectCardType(text);
+              if (!c) {
+                const t = text.toLowerCase();
+                if (t.includes("btg pactual")) c = "BTG";
+                else if (t.includes("itaú") || t.includes("itau")) c = "Itaú LP";
+                else c = null;
+              }
+              if (!c) return null;
+              f = detectFatura(text);
+              if (!f) return null;
+              p = c === "BTG" ? parseBTG(text, f) : parseItau(text, c, f);
+            }
+            return { card: c, parsed: p, fatura: f, isExtrato: asExtrato };
+          };
+
+          // Auto-detect: try credit card first, then extrato
+          let result = tryParse(false);
+          if (!result || result.parsed.length === 0) {
+            // Try extrato
+            const extratoResult = tryParse(true);
+            if (extratoResult && extratoResult.parsed.length > 0) {
+              result = extratoResult;
+            }
           }
-          if (!card) {
-            errors.push(`${file.name}: tipo não identificado`);
+          if (!result || result.parsed.length === 0) {
+            const cardDetected = detectCardType(text);
+            errors.push(`${file.name}: nenhum lançamento encontrado (detectado como ${cardDetected || "desconhecido"})`);
             continue;
           }
 
-          if (isExtrato) {
-            parsed = card === "BTG CC" ? parseBTGExtrato(text) : parseItauExtrato(text);
-            const months = [...new Set(parsed.map(t => t.fatura))].sort();
-            fatura = months.length > 0 ? months[months.length - 1] : null;
-            if (parsed.length === 0) { errors.push(`${file.name}: nenhum lançamento encontrado`); continue; }
-          } else {
-            fatura = detectFatura(text);
-            if (!fatura) { errors.push(`${file.name}: mês da fatura não identificado`); continue; }
-            parsed = card === "BTG" ? parseBTG(text, fatura) : parseItau(text, card, fatura);
-          }
+          card = result.card;
+          parsed = result.parsed;
+          fatura = result.fatura;
+          isExtrato = result.isExtrato;
 
           parsed = dedup(parsed);
           // Apply rename map
