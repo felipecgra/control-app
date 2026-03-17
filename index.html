@@ -279,8 +279,45 @@ function parseItau(text, cardName, faturaKey) {
     "parcelas fixas","limite total","limite disponível","limite máximo","limite total utilizado",
     "anuidade diferenci","estorno de anuidade","lançamentos internacionais","dólar de conversão",
     "total de obrigações","produtos/serviços","estabelecimento","valor em r"];
+  
+  // Multiple patterns for different Itaú card formats
+  const patterns = [
+    // Standard: DD/MM description 1.234,56
+    /(\d{2}\/\d{2})\s+(.+?)\s+([-]?\d{1,3}(?:\.\d{3})*,\d{2})\s*$/,
+    // With R$: DD/MM description R$ 1.234,56
+    /(\d{2}\/\d{2})\s+(.+?)\s+R\$\s*([-]?\d{1,3}(?:\.\d{3})*,\d{2})\s*$/,
+    // DD/MM/YYYY format: DD/MM/YYYY description 1.234,56
+    /(\d{2}\/\d{2})\/\d{2,4}\s+(.+?)\s+([-]?\d{1,3}(?:\.\d{3})*,\d{2})\s*$/,
+    // DD/MM/YYYY with R$
+    /(\d{2}\/\d{2})\/\d{2,4}\s+(.+?)\s+R\$\s*([-]?\d{1,3}(?:\.\d{3})*,\d{2})\s*$/,
+    // Non-anchored: DD/MM description 1.234,56
+    /(\d{2}\/\d{2})\s+(.+?)\s+([-]?\d{1,3}(?:\.\d{3})*,\d{2})/,
+  ];
+  
+  // Also try joining consecutive lines (some PDFs split transactions across lines)
+  const joinedLines = [];
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i].trim();
+    if (!line) continue;
+    // If line starts with DD/MM, start a new entry; otherwise append to previous
+    if (/^\d{2}\/\d{2}/.test(line)) {
+      joinedLines.push(line);
+    } else if (joinedLines.length > 0 && /,\d{2}\s*$/.test(line)) {
+      // Line ends with an amount — join with previous
+      joinedLines[joinedLines.length - 1] += " " + line;
+    } else if (joinedLines.length > 0 && !joinedLines[joinedLines.length - 1].match(/\d{1,3}(?:\.\d{3})*,\d{2}\s*$/)) {
+      // Previous line doesn't have an amount yet — this might be the rest of description
+      joinedLines[joinedLines.length - 1] += " " + line;
+    } else {
+      joinedLines.push(line);
+    }
+  }
+  
+  const allLines = [...new Set([...lines.map(l => l.trim()), ...joinedLines])];
+  
+  for (let i = 0; i < allLines.length; i++) {
+    const line = allLines[i];
+    if (!line) continue;
     if (/pr[óo]ximas?\s+faturas?/i.test(line)) { inProximas = true; continue; }
     if (inProximas) {
       if (/lan[çc]amentos.*compras/i.test(line) || /limites?\s+de\s+cr[ée]dito/i.test(line) ||
@@ -288,31 +325,43 @@ function parseItau(text, cardName, faturaKey) {
           /encargos\s+cobrados/i.test(line)) { inProximas = false; } else continue;
     }
     if (skipKw.some(kw => line.toLowerCase().includes(kw))) continue;
-    const txPattern = /(\d{2}\/\d{2})\s+(.+?)\s+([-]?\d{1,3}(?:\.\d{3})*,\d{2})/g;
-    let match;
-    while ((match = txPattern.exec(line)) !== null) {
+    
+    let matched = false;
+    for (const pat of patterns) {
+      const match = line.match(pat);
+      if (!match) continue;
       const dateStr = match[1];
       let desc = match[2].trim();
       const amountStr = match[3];
+      // Remove trailing R$ from description if pattern captured it
+      desc = desc.replace(/\s*R\$\s*$/, "").trim();
+      if (!desc || desc.length < 2) continue;
+      
       let neg = false;
-      const preAmt = line.substring(Math.max(0, match.index + match[1].length + match[2].length), match.index + match[0].length);
-      if (line.substring(Math.max(0, match.index - 3), match.index + match[0].length).includes("- ")) neg = true;
+      if (line.includes("- ") && line.indexOf("- ") < line.indexOf(amountStr)) neg = true;
       let amount = parseFloat(amountStr.replace(/\./g,"").replace(",","."));
       if (neg || amountStr.startsWith("-")) amount = -Math.abs(amount);
       if (Math.abs(amount) < 0.50) continue;
-      // Category from next line (Itaú puts category below)
+      
       let cat = "Compras";
-      if (i + 1 < lines.length) {
-        const nextLine = lines[i + 1].trim().toUpperCase();
+      if (i + 1 < allLines.length) {
+        const nextLine = allLines[i + 1].trim().toUpperCase();
         for (const [itauCat, appCat] of Object.entries(ITAU_CAT_MAP)) {
           if (nextLine.includes(itauCat)) { cat = appCat; break; }
         }
       }
+      // Also try categorize() as fallback
+      const autoCat = categorize(desc);
+      if (autoCat !== "Compras") cat = autoCat;
+      
       const [dd, mm] = dateStr.split("/").map(Number);
+      if (dd < 1 || dd > 31 || mm < 1 || mm > 12) continue;
       const year = resolveYear(mm, faturaKey);
       const fullDate = `${year}-${String(mm).padStart(2,"0")}-${String(dd).padStart(2,"0")}`;
       if (desc.toLowerCase().includes("produtos/serviços") || desc.toLowerCase().includes("estabelecimento")) continue;
       transactions.push({ date: fullDate, desc, amount, card: cardName, cat, fatura: faturaKey });
+      matched = true;
+      break; // Use first matching pattern
     }
   }
   return transactions;
@@ -634,6 +683,7 @@ function ControlApp() {
   const [viewMode, setViewMode] = useState("pagamento"); // "pagamento" | "lancamento"
   const [uploadHover, setUploadHover] = useState(false);
   const [showUpload, setShowUpload] = useState(false);
+  const [showDeleteAll, setShowDeleteAll] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
   const [searchActive, setSearchActive] = useState(false);
   const [searchPeriod, setSearchPeriod] = useState("6M");
@@ -1333,10 +1383,18 @@ function ControlApp() {
               </p>
             )}
           </div>
-          <button onClick={() => { setShowUpload(!showUpload); setImportState(null); }}
-            style={{ background: "linear-gradient(135deg, #0ea5e9, #0369a1)", border: "none", color: "#fff", padding: "10px 20px", borderRadius: 10, cursor: "pointer", fontSize: 13, fontWeight: 600, fontFamily: "inherit" }}>
-            + Importar PDF
-          </button>
+          <div style={{ display: "flex", gap: 8 }}>
+            {transactions.length > 0 && (
+              <button onClick={() => setShowDeleteAll(true)}
+                style={{ background: "transparent", border: "1px solid #1e293b", color: "#64748b", padding: "10px 14px", borderRadius: 10, cursor: "pointer", fontSize: 13, fontWeight: 500, fontFamily: "inherit" }}>
+                🗑
+              </button>
+            )}
+            <button onClick={() => { setShowUpload(!showUpload); setImportState(null); }}
+              style={{ background: "linear-gradient(135deg, #0ea5e9, #0369a1)", border: "none", color: "#fff", padding: "10px 20px", borderRadius: 10, cursor: "pointer", fontSize: 13, fontWeight: 600, fontFamily: "inherit" }}>
+              + Importar PDF
+            </button>
+          </div>
         </div>
 
         {showUpload && (
@@ -2044,6 +2102,51 @@ function ControlApp() {
           </div>
         );
       })()}
+
+      {/* Delete All Confirmation Modal */}
+      {showDeleteAll && (
+        <div onClick={() => setShowDeleteAll(false)}
+          style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.7)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 200, animation: "fadeIn 0.15s ease", padding: isMobile ? 16 : 20 }}>
+          <div onClick={(e) => e.stopPropagation()}
+            style={{ background: "#0f1219", borderRadius: 20, padding: isMobile ? 20 : 28, width: "100%", maxWidth: 380, border: "1px solid #1e293b", animation: "modalIn 0.2s ease" }}>
+            <h3 style={{ margin: "0 0 12px", fontSize: 17, color: "#f1f5f9", fontWeight: 700 }}>Excluir todos os dados?</h3>
+            <p style={{ margin: "0 0 8px", fontSize: 13, color: "#94a3b8" }}>
+              Isso vai apagar todas as transações ({transactions.length}), investimentos, categorias personalizadas e regras de renomeação.
+            </p>
+            <p style={{ margin: "0 0 24px", fontSize: 12, color: "#ef4444" }}>
+              Esta ação não pode ser desfeita.
+            </p>
+            <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+              <button onClick={() => {
+                  setTransactions([]);
+                  setHoldings([]);
+                  setRenameMap({});
+                  setCategoryMeta({...DEFAULT_CATEGORIES});
+                  setDeletedKeys(new Set());
+                  setSelectedCategory(null);
+                  setSearchActive(false);
+                  setSearchTerm("");
+                  setSearchQuery("");
+                  // Clear localStorage
+                  store.set("transactions", []);
+                  store.set("holdings", []);
+                  store.set("rename-map", {});
+                  store.set("custom-categories", {});
+                  setShowDeleteAll(false);
+                }}
+                style={{ padding: "12px 20px", borderRadius: 12, border: "none", color: "#fff", fontSize: 14, fontWeight: 600, cursor: "pointer", fontFamily: "inherit",
+                  background: "linear-gradient(135deg, #ef4444, #b91c1c)", transition: "all 0.2s" }}>
+                Sim, excluir tudo
+              </button>
+              <button onClick={() => setShowDeleteAll(false)}
+                style={{ padding: "12px 20px", borderRadius: 12, border: "1px solid #1e293b", color: "#e2e8f0", fontSize: 14, fontWeight: 500, cursor: "pointer", fontFamily: "inherit",
+                  background: "transparent", transition: "all 0.2s" }}>
+                Cancelar
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Category Manager Modal */}
       {showCatManager && (
